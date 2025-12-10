@@ -1,7 +1,7 @@
 # runs_app.py
 # Refactorización del programa de Pruebas de Corridas (3 aplicaciones)
 # - App1: Probabilidades exactas de R corridas (combinatoria correcta)
-# - App2: Runs test para secuencias binarias (Z y p-value)
+# - App2: Runs test para secuencias binarias (Z y p-value) - MEJORADA CON GRÁFICA DE DOS COLAS
 # - App3: Runs test aplicado a datos numéricos frente a umbral (media/mediana/específico)
 #
 # Requisitos: numpy, scipy, matplotlib, pandas (opcional para CSV)
@@ -69,6 +69,7 @@ class RunsApp:
         btnf = ttk.Frame(inp); btnf.grid(row=3, column=0, columnspan=2, pady=8)
         ttk.Button(btnf, text="Calcular", command=self.app1_calcular).pack(side='left', padx=4)
         ttk.Button(btnf, text="Exportar texto", command=lambda: self._export_text(self.app1_output)).pack(side='left')
+        ttk.Button(btnf, text="Exportar PNG", command=lambda: self._export_png(self.app1_fig)).pack(side='left', padx=4)
 
         outf = ttk.LabelFrame(left, text="Resultados (texto)")
         outf.pack(fill='both', expand=True, padx=6, pady=6)
@@ -162,7 +163,7 @@ class RunsApp:
         self.app1_canvas.draw()
 
     # -----------------------------
-    # APP 2: Prueba de corridas para secuencias binarias
+    # APP 2: Prueba de corridas para secuencias binarias - MEJORADA
     # -----------------------------
     def _build_app2(self):
         frame = ttk.Frame(self.nb)
@@ -188,18 +189,20 @@ class RunsApp:
         ttk.Button(btnf, text="Cargar archivo (txt/csv)", command=self.app2_load_file).pack(side='left', padx=4)
         ttk.Button(btnf, text="Ejecutar test", command=self.app2_run).pack(side='left', padx=4)
         ttk.Button(btnf, text="Exportar texto", command=lambda: self._export_text(self.app2_output)).pack(side='left')
+        ttk.Button(btnf, text="Exportar PNG", command=lambda: self._export_png(self.app2_fig)).pack(side='left', padx=4)
 
         outf = ttk.LabelFrame(frame, text="Resultados")
         outf.pack(fill='both', expand=True, padx=6, pady=6)
-        self.app2_text = scrolledtext.ScrolledText(outf)
-        self.app2_text.pack(fill='both', expand=True)
+        self.app2_text = scrolledtext.ScrolledText(outf, height=10)
+        self.app2_text.pack(fill='x', padx=6, pady=6)
 
-        # simple sequence plot
-        self.app2_fig = Figure(figsize=(6,2.5), dpi=100)
+        # Gráficos mejorados (2 subplots)
+        self.app2_fig = Figure(figsize=(10,5), dpi=100)
         self.app2_canvas = FigureCanvasTkAgg(self.app2_fig, master=outf)
-        self.app2_canvas.get_tk_widget().pack(fill='x', padx=6, pady=6)
+        self.app2_canvas.get_tk_widget().pack(fill='both', expand=True, padx=6, pady=6)
 
         self.app2_output = ""
+        self.app2_stats = {}  # Para almacenar estadísticas
 
     def app2_load_file(self):
         fn = filedialog.askopenfilename(filetypes=[("Text/CSV","*.txt;*.csv;*.dat"),("All","*.*")])
@@ -259,14 +262,15 @@ class RunsApp:
         except:
             alpha = 0.05
 
-        text, seq_plot = self.runs_test_sequence(seq, alpha)
+        text, seq_plot, stats = self.runs_test_sequence(seq, alpha)
         self.app2_output = text
+        self.app2_stats = stats
         self.app2_text.delete('1.0', tk.END)
         self.app2_text.insert(tk.END, text)
-        self._draw_app2_sequence(seq_plot)
+        self._draw_app2_improved(seq_plot, stats, alpha)
 
     def runs_test_sequence(self, seq, alpha=0.05):
-        """Devuelve (texto_resultado, numeric_sequence para plot)."""
+        """Devuelve (texto_resultado, numeric_sequence para plot, stats_dict)."""
         seq_num = [int(x) for x in seq]
         n = len(seq_num)
         n1 = sum(seq_num)
@@ -274,7 +278,7 @@ class RunsApp:
 
         # Count runs
         if n == 0:
-            return ("Secuencia vacía", seq_num)
+            return ("Secuencia vacía", seq_num, {})
         runs = 1
         for i in range(1, n):
             if seq_num[i] != seq_num[i-1]:
@@ -291,13 +295,25 @@ class RunsApp:
             mu = sigma = Z = 0.0
             p_value = 1.0
 
+        # Guardar estadísticas
+        stats = {
+            'n': n, 'n1': n1, 'n2': n2,
+            'runs': runs, 'mu': mu, 'sigma': sigma,
+            'Z': Z, 'p_value': p_value, 'alpha': alpha
+        }
+
         lines = []
         lines.append("APLICACIÓN 2: RUNS TEST (SECUENCIA BINARIA)\n")
         lines.append(f"n = {n}, n1 = {n1}, n2 = {n2}\n")
         lines.append(f"Corridas observadas R = {runs}\n")
         lines.append(f"Esperado μ_R = {mu:.4f}, σ_R = {sigma:.4f}\n")
         lines.append(f"Z = {Z:.4f}, p-value (bilateral) = {p_value:.6f}\n")
-        lines.append(f"Nivel α = {alpha}\n\n")
+        lines.append(f"Nivel α = {alpha}\n")
+        
+        # Valores críticos
+        z_crit = norm.ppf(1 - alpha/2)
+        lines.append(f"Valores críticos: Z_α/2 = ±{z_crit:.4f}\n\n")
+        
         if p_value > alpha:
             lines.append("DECISIÓN: No se rechaza H0 → Secuencia compatible con aleatoriedad.\n")
         else:
@@ -307,7 +323,6 @@ class RunsApp:
         runs_list = []
         current = seq_num[0]
         length = 1
-        starts = [0]
         lengths = []
         types = []
         for i in range(1, n):
@@ -319,7 +334,6 @@ class RunsApp:
                 lengths.append(length)
                 current = seq_num[i]
                 length = 1
-                starts.append(i)
         runs_list.append((current, length))
         types.append(current)
         lengths.append(length)
@@ -329,18 +343,80 @@ class RunsApp:
             lines.append(f"  Corrida {idx}: valor={val}, longitud={lng}\n")
         lines.append("\nResumen longitudes: max=%d, min=%d, avg=%.2f\n" % (max(lengths), min(lengths), sum(lengths)/len(lengths)))
 
-        return ("".join(lines), seq_num)
+        return ("".join(lines), seq_num, stats)
 
-    def _draw_app2_sequence(self, seq_num):
+    def _draw_app2_improved(self, seq_num, stats, alpha):
+        """Dibuja dos gráficos: secuencia y distribución normal con prueba de dos colas."""
         self.app2_fig.clear()
-        ax = self.app2_fig.add_subplot(111)
+        
+        # Subplot 1: Secuencia binaria
+        ax1 = self.app2_fig.add_subplot(1, 2, 1)
         x = list(range(1, len(seq_num)+1))
-        ax.step(x, seq_num, where='mid', linewidth=1.5)
-        ax.set_ylim(-0.2, 1.2)
-        ax.set_yticks([0,1])
-        ax.set_yticklabels(['0','1'])
-        ax.set_xlabel("Posición")
-        ax.set_title("Secuencia binaria (0/1)")
+        ax1.step(x, seq_num, where='mid', linewidth=1.5, color='steelblue')
+        ax1.set_ylim(-0.2, 1.2)
+        ax1.set_yticks([0,1])
+        ax1.set_yticklabels(['0','1'])
+        ax1.set_xlabel("Posición")
+        ax1.set_ylabel("Valor")
+        ax1.set_title("Secuencia binaria observada")
+        ax1.grid(True, alpha=0.3)
+        
+        # Subplot 2: Distribución normal con prueba de dos colas
+        ax2 = self.app2_fig.add_subplot(1, 2, 2)
+        
+        Z_obs = stats.get('Z', 0)
+        z_crit = norm.ppf(1 - alpha/2)
+        
+        # Rango de valores Z para graficar
+        z_range = np.linspace(-4, 4, 500)
+        pdf_vals = norm.pdf(z_range)
+        
+        # Graficar la distribución normal
+        ax2.plot(z_range, pdf_vals, 'k-', linewidth=2, label='N(0,1)')
+        
+        # Sombrear regiones críticas (dos colas)
+        # Cola izquierda
+        z_left = z_range[z_range <= -z_crit]
+        pdf_left = norm.pdf(z_left)
+        ax2.fill_between(z_left, 0, pdf_left, alpha=0.3, color='red', 
+                         label=f'Región crítica α/2={alpha/2:.3f}')
+        
+        # Cola derecha
+        z_right = z_range[z_range >= z_crit]
+        pdf_right = norm.pdf(z_right)
+        ax2.fill_between(z_right, 0, pdf_right, alpha=0.3, color='red')
+        
+        # Región de no rechazo
+        z_middle = z_range[(z_range > -z_crit) & (z_range < z_crit)]
+        pdf_middle = norm.pdf(z_middle)
+        ax2.fill_between(z_middle, 0, pdf_middle, alpha=0.2, color='green',
+                        label='Región de no rechazo')
+        
+        # Líneas verticales para valores críticos
+        ax2.axvline(-z_crit, color='orange', linestyle='--', linewidth=1.5,
+                   label=f'Z crítico = ±{z_crit:.3f}')
+        ax2.axvline(z_crit, color='orange', linestyle='--', linewidth=1.5)
+        
+        # Valor Z observado
+        ax2.axvline(Z_obs, color='blue', linestyle='-', linewidth=2,
+                   label=f'Z obs = {Z_obs:.3f}')
+        
+        # Etiquetas y título
+        ax2.set_xlabel('Valor Z')
+        ax2.set_ylabel('Densidad de probabilidad')
+        ax2.set_title(f'Prueba de dos colas (α={alpha})')
+        ax2.legend(loc='upper right', fontsize=8)
+        ax2.grid(True, alpha=0.3)
+        
+        # Añadir texto con el p-value
+        p_val = stats.get('p_value', 1)
+        decision_color = 'red' if p_val < alpha else 'green'
+        ax2.text(0.02, 0.98, f'p-value = {p_val:.4f}', 
+                transform=ax2.transAxes, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor=decision_color, alpha=0.3),
+                fontsize=10, fontweight='bold')
+        
+        self.app2_fig.tight_layout()
         self.app2_canvas.draw()
 
     # -----------------------------
@@ -430,7 +506,7 @@ class RunsApp:
         n = len(values)
         signs = [1 if v > reference else 0 for v in values]
         # apply the binary runs test to 'signs'
-        summary, _ = self.runs_test_sequence([str(x) for x in signs], alpha=0.05)
+        summary, _, _ = self.runs_test_sequence([str(x) for x in signs], alpha=0.05)
         # Add numeric summary
         lines = []
         lines.append("APLICACIÓN 3: CONTROL DE PROCESO CON RUNS\n")
@@ -479,6 +555,19 @@ class RunsApp:
         with open(fn, 'w', encoding='utf8') as f:
             f.write(text)
         messagebox.showinfo("Exportar", f"Exportado a {fn}")
+
+    def _export_png(self, figure):
+        fn = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG Image","*.png")]
+        )
+        if not fn:
+            return
+        try:
+            figure.savefig(fn, dpi=300)
+            messagebox.showinfo("Exportar PNG", f"Gráfico exportado a {fn}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo exportar: {e}")
 
 
 if __name__ == "__main__":
